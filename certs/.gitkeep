@@ -1,0 +1,2 @@
+# TLS certificates go here (fullchain.pem + privkey.pem) for the nginx tls profile.
+# This file just keeps the directory in git; real certs are gitignored.

@@ -1,0 +1,61 @@
+# Reverse proxy for the FerrumLink relay. Terminates TLS and upgrades
+# WebSocket connections (/ws) to the relay container on the compose network.
+#
+# ${DOMAIN} is filled in from the .env by the nginx image's envsubst step.
+
+upstream ferrumlink_relay {
+    server relay:8080;
+}
+
+# HTTP :80 — ACME challenges + redirect everything else to HTTPS.
+server {
+    listen 80;
+    listen [::]:80;
+    server_name ${DOMAIN};
+
+    location /.well-known/acme-challenge/ {
+        root /var/www/certbot;
+    }
+
+    location / {
+        return 301 https://$host$request_uri;
+    }
+}
+
+# HTTPS :443 — the real entry point. Proxies REST + WebSocket to the relay.
+server {
+    listen 443 ssl;
+    listen [::]:443 ssl;
+    http2 on;
+    server_name ${DOMAIN};
+
+    ssl_certificate     /etc/nginx/certs/fullchain.pem;
+    ssl_certificate_key /etc/nginx/certs/privkey.pem;
+
+    ssl_protocols       TLSv1.2 TLSv1.3;
+    ssl_ciphers         HIGH:!aNULL:!MD5;
+    ssl_session_cache   shared:SSL:10m;
+    ssl_session_timeout 1d;
+
+    # Relay frames can be large; don't cap the body.
+    client_max_body_size 0;
+
+    location / {
+        proxy_pass http://ferrumlink_relay;
+        proxy_http_version 1.1;
+
+        # WebSocket upgrade (the /ws signaling channel).
+        proxy_set_header Upgrade $http_upgrade;
+        proxy_set_header Connection "upgrade";
+
+        # Preserve client info — the relay's rate limiter reads X-Forwarded-For.
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+
+        # Long-lived WS connections.
+        proxy_read_timeout  3600s;
+        proxy_send_timeout  3600s;
+    }
+}
