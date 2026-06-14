@@ -1,6 +1,6 @@
-name: ferrumlink-server
+name: rivetlink-server
 
-# FerrumLink relay server — production deployment stack.
+# RivetLink relay server — production deployment stack.
 #
 # Core services (always on):  postgres, redis, relay
 # Optional profiles:
@@ -12,26 +12,26 @@ name: ferrumlink-server
 services:
   postgres:
     image: postgres:16
-    container_name: ferrumlink-postgres
+    container_name: rivetlink-postgres
     restart: unless-stopped
     environment:
-      POSTGRES_USER: ferrum
+      POSTGRES_USER: rivet
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env (run ./install.sh)}
-      POSTGRES_DB: ferrum
+      POSTGRES_DB: rivet
     volumes:
       - postgres_data:/var/lib/postgresql/data
     # Not published to the host — only the relay (same compose network) needs it.
     expose:
       - "5432"
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U ferrum -d ferrum"]
+      test: ["CMD-SHELL", "pg_isready -U rivet -d rivet"]
       interval: 5s
       timeout: 5s
       retries: 10
 
   redis:
     image: redis:7-alpine
-    container_name: ferrumlink-redis
+    container_name: rivetlink-redis
     restart: unless-stopped
     command: ["redis-server", "--appendonly", "no", "--save", "60", "1"]
     expose:
@@ -45,10 +45,10 @@ services:
   relay:
     # Published image (CI pushes on tag). To run a locally built binary instead,
     # set RELAY_IMAGE in .env to your local tag, e.g.
-    #   docker build -f docker/Dockerfile.relay -t ferrumlink-relay:local .   (in the main FerrumLink repo)
-    #   RELAY_IMAGE=ferrumlink-relay:local
-    image: ${RELAY_IMAGE:-ghcr.io/ferrumlink/ferrumlink-relay:latest}
-    container_name: ferrumlink-relay
+    #   docker build -f docker/Dockerfile.relay -t rivetlink-relay:local .   (in the main RivetLink repo)
+    #   RELAY_IMAGE=rivetlink-relay:local
+    image: ${RELAY_IMAGE:-gtheunissen/rivetlink-relay:latest}
+    container_name: rivetlink-relay
     restart: unless-stopped
     depends_on:
       postgres:
@@ -57,7 +57,7 @@ services:
         condition: service_healthy
     environment:
       # Assembled from POSTGRES_PASSWORD so the password lives in exactly one place.
-      DATABASE_URL: postgres://ferrum:${POSTGRES_PASSWORD}@postgres:5432/ferrum
+      DATABASE_URL: postgres://rivet:${POSTGRES_PASSWORD}@postgres:5432/rivet
       REDIS_URL: redis://redis:6379
       JWT_SECRET: ${JWT_SECRET:?set JWT_SECRET in .env (run ./install.sh)}
       BIND_ADDR: 0.0.0.0:8080
@@ -76,7 +76,7 @@ services:
 
   nginx:
     image: nginx:1.27-alpine
-    container_name: ferrumlink-nginx
+    container_name: rivetlink-nginx
     restart: unless-stopped
     profiles: ["tls"]
     depends_on:
@@ -95,7 +95,7 @@ services:
 
   coturn:
     image: coturn/coturn:latest
-    container_name: ferrumlink-coturn
+    container_name: rivetlink-coturn
     restart: unless-stopped
     profiles: ["turn"]
     # host networking so the TURN relay port range is reachable without per-port maps.

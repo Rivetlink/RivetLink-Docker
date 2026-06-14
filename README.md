@@ -1,10 +1,10 @@
-# FerrumLink Server — Docker Deployment
+# RivetLink Server — Docker Deployment
 
-Self-host a **FerrumLink relay server** in minutes. This repo is a ready-made
+Self-host a **RivetLink relay server** in minutes. This repo is a ready-made
 Docker bundle: PostgreSQL + Redis + the relay, with optional HTTPS (nginx) and
 TURN (coturn). The desktop/CLI apps connect to whatever relay you run here.
 
-> **What is the relay?** FerrumLink is a zero-trust remote-control platform. The
+> **What is the relay?** RivetLink is a zero-trust remote-control platform. The
 > relay is *only* a signaling + fallback server — it is **never** a trusted
 > authority. All session content is end-to-end encrypted; the relay sees
 > ciphertext and metadata, never your screen or keystrokes. Running your own
@@ -25,8 +25,8 @@ TURN (coturn). The desktop/CLI apps connect to whatever relay you run here.
 ## Quick start (LAN / plain HTTP)
 
 ```bash
-git clone https://github.com/<you>/FerrumLinkServerDocker.git
-cd FerrumLinkServerDocker
+git clone https://github.com/Rivetlink/RivetLink-Docker.git
+cd RivetLink-Docker
 ./install.sh
 ```
 
@@ -37,7 +37,7 @@ images, and starts the stack. Verify:
 curl http://localhost:8080/health      # → {"status":"ok", ...}
 ```
 
-Point the FerrumLink app at `http://<this-host-ip>:8080`.
+Point the RivetLink app at `http://<this-host-ip>:8080`.
 
 > ⚠ Plain HTTP is fine for a trusted LAN. **For anything over the internet, use
 > the HTTPS setup below** — tokens and signaling should never cross the network
@@ -87,7 +87,7 @@ curl -sX POST https://relay.example.com/auth/register \
 ```
 
 The response contains `access_token` / `refresh_token` and your `user_id` /
-`organization_id`. From here on, log in from the FerrumLink app with that email +
+`organization_id`. From here on, log in from the RivetLink app with that email +
 password. The first user is the org `owner`; additional users/devices are managed
 through the app and API.
 
@@ -120,12 +120,12 @@ docker compose up -d
 
 **Back up the database**
 ```bash
-docker compose exec postgres pg_dump -U ferrum ferrum > backup-$(date +%F).sql
+docker compose exec postgres pg_dump -U rivet rivet > backup-$(date +%F).sql
 ```
 
 **Restore**
 ```bash
-cat backup-YYYY-MM-DD.sql | docker compose exec -T postgres psql -U ferrum -d ferrum
+cat backup-YYYY-MM-DD.sql | docker compose exec -T postgres psql -U rivet -d rivet
 ```
 
 **Rotate secrets** — `./install.sh --force` regenerates `.env` with new secrets.
@@ -142,7 +142,7 @@ The important ones:
 | ------------------- | ------------------------------------ | ------- |
 | `POSTGRES_PASSWORD` | *(random)*                           | DB password; also woven into `DATABASE_URL`. |
 | `JWT_SECRET`        | *(random, ≥32 chars)*                | Signs access/refresh tokens. Keep secret. |
-| `RELAY_IMAGE`       | `ghcr.io/ferrumlink/ferrumlink-relay:latest` | Relay image to run. |
+| `RELAY_IMAGE`       | `gtheunissen/rivetlink-relay:latest` | Relay image to run. |
 | `RELAY_PORT`        | `8080`                               | Host port for plain HTTP. Use `127.0.0.1:8080` behind nginx. |
 | `DOMAIN`            | `relay.example.com`                  | Public hostname (tls profile only). |
 | `RUST_LOG`          | `info`                               | Log verbosity. |
@@ -163,14 +163,14 @@ The important ones:
 ## Running a locally built image (no published image yet)
 
 Until the official image is published to GHCR, build it from the **main
-FerrumLink repo** and point this stack at your local tag:
+RivetLink repo** and point this stack at your local tag:
 
 ```bash
-# in the FerrumLink workspace repo:
-docker build -f docker/Dockerfile.relay -t ferrumlink-relay:local .
+# in the RivetLink workspace repo:
+docker build -f docker/Dockerfile.relay -t rivetlink-relay:local .
 
 # here, in .env:
-RELAY_IMAGE=ferrumlink-relay:local
+RELAY_IMAGE=rivetlink-relay:local
 ```
 Then `docker compose up -d`.
 
@@ -215,5 +215,5 @@ Then `docker compose up -d`.
 
 ---
 
-*Part of the FerrumLink project. The relay is signaling-only and never a trusted
+*Part of the RivetLink project. The relay is signaling-only and never a trusted
 authority — see the main project for the agent, client, and SDK.*

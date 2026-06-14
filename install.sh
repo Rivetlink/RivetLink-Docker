@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 #
-# FerrumLink relay server installer.
+# RivetLink relay server installer.
 #
 # Generates a .env with strong random secrets, pulls the images, and brings the
 # stack up. Idempotent: an existing .env is kept unless you pass --force.
@@ -82,7 +82,7 @@ echo "→ starting stack…"
 docker compose "${PROFILES[@]}" up -d
 
 echo
-echo "✓ FerrumLink relay is up."
+echo "✓ RivetLink relay is up."
 docker compose "${PROFILES[@]}" ps
 echo
 if [[ $WITH_TLS -eq 1 ]]; then

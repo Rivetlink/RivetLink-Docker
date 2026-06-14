@@ -1,9 +1,9 @@
-# Reverse proxy for the FerrumLink relay. Terminates TLS and upgrades
+# Reverse proxy for the RivetLink relay. Terminates TLS and upgrades
 # WebSocket connections (/ws) to the relay container on the compose network.
 #
 # ${DOMAIN} is filled in from the .env by the nginx image's envsubst step.
 
-upstream ferrumlink_relay {
+upstream rivetlink_relay {
     server relay:8080;
 }
 
@@ -41,7 +41,7 @@ server {
     client_max_body_size 0;
 
     location / {
-        proxy_pass http://ferrumlink_relay;
+        proxy_pass http://rivetlink_relay;
         proxy_http_version 1.1;
 
         # WebSocket upgrade (the /ws signaling channel).
