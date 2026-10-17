@@ -60,6 +60,30 @@ else
   echo "✓ wrote .env with fresh random POSTGRES_PASSWORD and JWT_SECRET (chmod 600)."
 fi
 
+# ── TURN config (--with-turn) ───────────────────────────────────────────────
+# coturn/turnserver.conf is a committed template; render the real config with a
+# per-install secret into coturn/turnserver.local.conf (gitignored), which is
+# what docker-compose mounts. The secret is kept in .env so re-runs are stable.
+if [[ $WITH_TURN -eq 1 ]]; then
+  if ! grep -qE '^TURN_SECRET=.+' .env; then
+    TURN_SECRET="$(openssl rand -hex 32)"
+    if grep -q '^TURN_SECRET=' .env; then
+      sed -i "s|^TURN_SECRET=.*|TURN_SECRET=${TURN_SECRET}|" .env
+    else
+      printf '\nTURN_SECRET=%s\n' "$TURN_SECRET" >> .env
+    fi
+    echo "✓ generated TURN_SECRET in .env."
+  fi
+  TURN_SECRET="$(grep '^TURN_SECRET=' .env | cut -d= -f2)"
+  TURN_REALM="$(grep '^DOMAIN=' .env | cut -d= -f2)"
+  sed -e "s|^static-auth-secret=.*|static-auth-secret=${TURN_SECRET}|" \
+      -e "s|^realm=.*|realm=${TURN_REALM:-relay.example.com}|" \
+      coturn/turnserver.conf > coturn/turnserver.local.conf
+  # 644, not 600: the coturn image runs as `nobody` and must read the mount.
+  chmod 644 coturn/turnserver.local.conf
+  echo "✓ wrote coturn/turnserver.local.conf (realm=${TURN_REALM:-relay.example.com})."
+fi
+
 # ── Compose profiles ────────────────────────────────────────────────────────
 PROFILES=()
 [[ $WITH_TLS -eq 1 ]]  && PROFILES+=(--profile tls)

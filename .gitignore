@@ -6,5 +6,8 @@
 !/certs/.gitkeep
 /certbot/
 
+# Rendered coturn config (contains TURN_SECRET)
+/coturn/turnserver.local.conf
+
 # Runtime / logs
 *.log

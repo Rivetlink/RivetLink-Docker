@@ -94,14 +94,15 @@ services:
       - ./certbot/www:/var/www/certbot:ro
 
   coturn:
-    image: coturn/coturn:latest
+    image: coturn/coturn:4.6.3
     container_name: rivetlink-coturn
     restart: unless-stopped
     profiles: ["turn"]
     # host networking so the TURN relay port range is reachable without per-port maps.
     network_mode: host
     volumes:
-      - ./coturn/turnserver.conf:/etc/coturn/turnserver.conf:ro
+      # Rendered by ./install.sh --with-turn (random secret, realm from DOMAIN).
+      - ./coturn/turnserver.local.conf:/etc/coturn/turnserver.conf:ro
 
 volumes:
   postgres_data:

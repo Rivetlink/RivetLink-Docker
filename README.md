@@ -196,7 +196,7 @@ Then `docker compose up -d`.
 ├── docker-compose.yml         # postgres + redis + relay (+ tls/turn profiles)
 ├── .env.example               # documented config template
 ├── nginx/templates/           # HTTPS reverse-proxy config (envsubst ${DOMAIN})
-├── coturn/turnserver.conf     # optional TURN config
+├── coturn/turnserver.conf     # optional TURN config template (install.sh renders turnserver.local.conf)
 ├── certs/                     # TLS cert + key live here (gitignored)
 └── scripts/obtain-cert.sh     # Let's Encrypt helper
 ```
