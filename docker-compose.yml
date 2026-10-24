@@ -2,10 +2,10 @@ name: rivetlink-server
 
 # RivetLink relay server — production deployment stack.
 #
-# Core services (always on):  postgres, redis, relay
-# Optional profiles:
-#   --profile tls    adds an nginx reverse proxy terminating HTTPS/WSS on 443
-#   --profile turn   adds a coturn TURN server for NAT traversal (future P2P)
+#   caddy     public HTTPS/WSS on 80/443, automatic Let's Encrypt certificate
+#   relay     the RivetLink relay (not published; only Caddy reaches it)
+#   postgres  accounts, devices, audit log (not published)
+#   coturn    optional, --profile turn (not used by RivetLink yet)
 #
 # All secrets and tunables live in `.env` (generate it with ./install.sh).
 
@@ -29,19 +29,6 @@ services:
       timeout: 5s
       retries: 10
 
-  redis:
-    image: redis:7-alpine
-    container_name: rivetlink-redis
-    restart: unless-stopped
-    command: ["redis-server", "--appendonly", "no", "--save", "60", "1"]
-    expose:
-      - "6379"
-    healthcheck:
-      test: ["CMD", "redis-cli", "ping"]
-      interval: 5s
-      timeout: 5s
-      retries: 10
-
   relay:
     # Published image (CI pushes on tag). To run a locally built binary instead,
     # set RELAY_IMAGE in .env to your local tag, e.g.
@@ -53,12 +40,9 @@ services:
     depends_on:
       postgres:
         condition: service_healthy
-      redis:
-        condition: service_healthy
     environment:
       # Assembled from POSTGRES_PASSWORD so the password lives in exactly one place.
       DATABASE_URL: postgres://rivet:${POSTGRES_PASSWORD}@postgres:5432/rivet
-      REDIS_URL: redis://redis:6379
       JWT_SECRET: ${JWT_SECRET:?set JWT_SECRET in .env (run ./install.sh)}
       BIND_ADDR: 0.0.0.0:8080
       RUST_LOG: ${RUST_LOG:-info}
@@ -69,29 +53,29 @@ services:
       HEARTBEAT_INTERVAL_SECS: ${HEARTBEAT_INTERVAL_SECS:-10}
       DISCONNECT_TIMEOUT_SECS: ${DISCONNECT_TIMEOUT_SECS:-30}
       RECONNECT_GRACE_SECS: ${RECONNECT_GRACE_SECS:-15}
-    # Direct exposure for plain-HTTP / LAN use. Behind the tls profile you can
-    # drop this and let nginx be the only public entry point.
-    ports:
-      - "${RELAY_PORT:-8080}:8080"
+    # Not published: Docker's published ports bypass ufw, so Caddy is the
+    # only way in.
+    expose:
+      - "8080"
+    cap_drop: [ALL]
+    security_opt: ["no-new-privileges:true"]
 
-  nginx:
-    image: nginx:1.27-alpine
-    container_name: rivetlink-nginx
+  caddy:
+    image: caddy:2.11.7-alpine
+    container_name: rivetlink-caddy
     restart: unless-stopped
-    profiles: ["tls"]
     depends_on:
       - relay
     environment:
-      # Only DOMAIN is substituted into the template; nginx's own $vars are left alone.
-      DOMAIN: ${DOMAIN:?set DOMAIN in .env to use the tls profile}
-      NGINX_ENVSUBST_FILTER: "DOMAIN"
+      DOMAIN: ${DOMAIN:?set DOMAIN in .env (run ./install.sh --domain ...)}
+      ACME_EMAIL: ${ACME_EMAIL:?set ACME_EMAIL in .env (run ./install.sh --email ...)}
     ports:
       - "80:80"
       - "443:443"
     volumes:
-      - ./nginx/templates:/etc/nginx/templates:ro
-      - ./certs:/etc/nginx/certs:ro
-      - ./certbot/www:/var/www/certbot:ro
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
 
   coturn:
     image: coturn/coturn:4.6.3
@@ -106,3 +90,5 @@ services:
 
 volumes:
   postgres_data:
+  caddy_data:
+  caddy_config:

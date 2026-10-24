@@ -1,0 +1,20 @@
+# Public entry point for the RivetLink relay. Caddy gets and renews the
+# Let's Encrypt certificate for $DOMAIN by itself and proxies REST and the
+# /ws WebSocket to the relay container.
+{
+	email {$ACME_EMAIL}
+}
+
+{$DOMAIN} {
+	# Accounts are created on the server itself with
+	# ./scripts/create-account.sh, never over the internet.
+	respond /auth/register 403
+
+	header Strict-Transport-Security "max-age=31536000"
+
+	reverse_proxy relay:8080 {
+		# Send only the address Caddy saw. A client-supplied
+		# X-Forwarded-For would let it dodge the relay's login rate limit.
+		header_up X-Forwarded-For {remote_host}
+	}
+}

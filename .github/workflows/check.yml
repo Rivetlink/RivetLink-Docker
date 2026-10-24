@@ -1,0 +1,31 @@
+name: check
+
+on:
+  pull_request:
+  push:
+    branches: [master]
+
+permissions:
+  contents: read
+
+jobs:
+  config:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: Shell scripts
+        run: |
+          for f in install.sh scripts/*.sh; do bash -n "$f"; done
+          shellcheck install.sh scripts/*.sh
+      - name: Compose file
+        env:
+          ACME_EMAIL: ci@example.com
+          POSTGRES_PASSWORD: ci
+          JWT_SECRET: ci-secret-that-is-long-enough-1234
+          DOMAIN: relay.example.com
+        run: docker compose config --quiet
+      - name: Caddyfile
+        run: >
+          docker run --rm -v "$PWD/Caddyfile:/etc/caddy/Caddyfile:ro"
+          -e DOMAIN=relay.example.com -e ACME_EMAIL=ci@example.com
+          caddy:2.11.7-alpine caddy validate --config /etc/caddy/Caddyfile --adapter caddyfile

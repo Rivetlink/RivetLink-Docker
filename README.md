@@ -1,219 +1,314 @@
-# RivetLink Server — Docker Deployment
+# RivetLink Relay — Docker deployment
 
-Self-host a **RivetLink relay server** in minutes. This repo is a ready-made
-Docker bundle: PostgreSQL + Redis + the relay, with optional HTTPS (nginx) and
-TURN (coturn). The desktop/CLI apps connect to whatever relay you run here.
+Run your own **RivetLink relay** on a small Ubuntu VPS. With it, you can reach
+your Linux Home Node from anywhere, including its login screen, when you are
+not on the same network.
 
-> **What is the relay?** RivetLink is a zero-trust remote-control platform. The
-> relay is *only* a signaling + fallback server — it is **never** a trusted
-> authority. All session content is end-to-end encrypted; the relay sees
-> ciphertext and metadata, never your screen or keystrokes. Running your own
-> relay means no third party is in the path at all.
+The relay is **not trusted** with your screen or keystrokes:
+
+- The app and the host run the same end-to-end encrypted session as on the LAN
+  (hybrid X25519 + ML-KEM handshake, host key pinned).
+- The relay only forwards the ciphertext.
+- A relay that lies about a host's key is refused by the handshake.
+
+The stack:
+
+| Service    | Role                                                              | Reachable from |
+|------------|-------------------------------------------------------------------|----------------|
+| `caddy`    | HTTPS/WSS on 80/443, gets and renews the Let's Encrypt certificate | internet       |
+| `relay`    | the RivetLink relay                                               | Caddy only     |
+| `postgres` | accounts, devices, audit log                                      | relay only     |
 
 ---
 
-## Requirements
+## What you need
 
-- A Linux host (VPS or your own box) with a public IP or LAN address
-- [Docker Engine](https://docs.docker.com/engine/install/) + the Docker Compose v2 plugin
-- `openssl` (for secret generation — preinstalled on most systems)
-- For HTTPS: a domain name pointing at the host, and ports **80/443** open
-- For plain/LAN use: port **8080** open
+- **A VPS running Ubuntu 24.04 or newer.** 1 vCPU and 1 GB RAM are enough.
+  The relay forwards a stream; it does not encode one.
+- **A domain name** you can add a DNS record to, for example
+  `relay.example.com`.
+- **An e-mail address** for Let's Encrypt expiry notices.
+- **SSH access** as a normal user with `sudo`.
 
 ---
 
-## Quick start (LAN / plain HTTP)
+## 1. Point your domain at the VPS
+
+At your DNS provider, add an **A** record. If your VPS also has IPv6, add an
+**AAAA** record too:
+
+```
+relay.example.com.   A      203.0.113.10
+relay.example.com.   AAAA   2001:db8::10
+```
+
+Wait until it resolves to your VPS. Run this on any machine:
+
+```bash
+dig +short relay.example.com
+```
+
+Caddy can only get a certificate once the name points at this server.
+
+## 2. Prepare the VPS
+
+Log in over SSH, then run:
+
+```bash
+sudo apt update && sudo apt upgrade -y
+sudo apt install -y git curl python3 ufw
+
+# Docker Engine + the Compose plugin (Docker's official install script)
+curl -fsSL https://get.docker.com | sudo sh
+
+# Run docker without sudo. Note: the docker group is root-equivalent.
+sudo usermod -aG docker "$USER"
+```
+
+Log out and back in so the group change applies. Then check:
+
+```bash
+docker compose version
+```
+
+## 3. Firewall
+
+Open only SSH and the web ports:
+
+```bash
+sudo ufw allow OpenSSH
+sudo ufw allow 80/tcp
+sudo ufw allow 443/tcp
+sudo ufw enable
+sudo ufw status
+```
+
+Port 80 must stay open: Let's Encrypt uses it to prove the domain, and Caddy
+uses it to redirect to HTTPS.
+
+The relay and Postgres are **not published** to the host. Docker-published
+ports bypass ufw, so this stack publishes only Caddy.
+
+## 4. Install the relay
 
 ```bash
 git clone https://github.com/Rivetlink/RivetLink-Docker.git
 cd RivetLink-Docker
-./install.sh
+./install.sh --domain relay.example.com --email you@example.com
 ```
 
-That's it. `install.sh` generates a `.env` with strong random secrets, pulls the
-images, and starts the stack. Verify:
+`install.sh` does the following:
+
+- creates `.env` with strong random secrets (`chmod 600`);
+- pulls the images and starts the stack;
+- waits until `https://relay.example.com/health` answers, which means the
+  certificate is in place.
+
+Check it from your own computer:
 
 ```bash
-curl http://localhost:8080/health      # → {"status":"ok", ...}
+curl https://relay.example.com/health
 ```
 
-Point the RivetLink app at `http://<this-host-ip>:8080`.
+`install.sh` is safe to run again. It keeps existing secrets and never changes
+the database password. Use it after changing `.env`.
 
-> ⚠ Plain HTTP is fine for a trusted LAN. **For anything over the internet, use
-> the HTTPS setup below** — tokens and signaling should never cross the network
-> in the clear.
+## 5. Create your account
 
----
-
-## Production (HTTPS + your domain)
-
-1. Point a DNS A/AAAA record at the host (e.g. `relay.example.com`).
-2. Get a TLS certificate (Let's Encrypt, free):
-
-   ```bash
-   ./scripts/obtain-cert.sh relay.example.com you@example.com
-   ```
-
-   This drops `certs/fullchain.pem` + `certs/privkey.pem` in place.
-3. Bring the stack up with the nginx TLS proxy:
-
-   ```bash
-   ./install.sh --domain relay.example.com --with-tls
-   ```
-
-The relay is now reachable at `https://relay.example.com` (and `wss://…` for the
-WebSocket signaling channel). Point the app at `wss://relay.example.com`.
-
-Behind nginx you normally don't want the raw relay port exposed — set
-`RELAY_PORT=127.0.0.1:8080` in `.env` (bind to loopback only) and re-run
-`docker compose --profile tls up -d`.
-
----
-
-## Bootstrap the first account
-
-A fresh relay has no users. Create the first **owner** account (this also creates
-your organization). It's a single REST call to `/auth/register`:
+Registration over the internet is switched off: Caddy answers `403` on
+`/auth/register`. Create accounts on the VPS itself:
 
 ```bash
-curl -sX POST https://relay.example.com/auth/register \
-  -H 'content-type: application/json' \
-  -d '{
-        "email": "you@example.com",
-        "password": "a-long-strong-password",
-        "display_name": "Your Name",
-        "organization_name": "Your Org"
-      }'
+./scripts/create-account.sh
 ```
 
-The response contains `access_token` / `refresh_token` and your `user_id` /
-`organization_id`. From here on, log in from the RivetLink app with that email +
-password. The first user is the org `owner`; additional users/devices are managed
-through the app and API.
+The script asks for your e-mail, name, an organization name and a password of
+at least 12 characters. The password is not echoed.
 
-> On a public relay you may want to register your owner account first, then put
-> the relay behind a firewall / disable open registration. (Open-registration
-> hardening is on the roadmap.)
+Use **this one account** on the Home Node and on every device you connect
+from. Devices see each other only inside the same organization.
+
+## 6. Connect the apps
+
+Do this on **both** the Linux Home Node and the laptop or desktop you control
+it from:
+
+1. Open RivetLink → **Settings → Servers → Add server**.
+2. Enter `https://relay.example.com` and activate it.
+3. Sign in with the account from step 5.
+
+The app builds the secure `wss://relay.example.com/ws` connection itself.
+
+### Make the Home Node reachable through the relay
+
+On the Linux Home Node:
+
+1. Open **Settings → Ubuntu physical console**.
+2. Choose **Set up physical console**, or **Update / reconfigure** if it is
+   already set up.
+3. Turn on **Via relay**. You can keep **Local network** on too.
+4. Paste the public key of your controlling laptop or desktop. You find it on
+   that device under **Settings → Security**.
+5. Confirm with your Ubuntu password when asked.
+
+The console service on the Home Node registers itself with the relay under
+your account and stays connected.
+
+### Connect from outside your network
+
+On the controlling device, press **Connect** on the saved Home Node:
+
+- On the same LAN, the app connects directly.
+- Elsewhere, the app finds the same host (matched by its public key) at the
+  relay and opens an encrypted tunnel to it.
+
+You get the login screen before sign-in, and the live desktop after it.
+
+The first time the app reaches a host through a given relay, it pins that
+host's key. If the key ever changes, the app refuses to connect. Remove and
+re-add the host only when you rotated its identity on purpose.
 
 ---
 
-## Day-2 operations
+## Day-to-day
 
-**Status / logs**
+### Status and logs
+
 ```bash
 docker compose ps
 docker compose logs -f relay
+docker compose logs -f caddy      # certificate problems show up here
 ```
 
-**Update to a newer relay release**
+### Updating
+
+Pin the relay image in `.env` instead of following `latest`, so an update is a
+choice you make:
+
+```
+RELAY_IMAGE=gtheunissen/rivetlink-relay:<version>
+```
+
+To update:
+
+1. Run `git pull` to get the latest stack files.
+2. Set the new `<version>` in `.env`.
+3. Run `./install.sh`, which pulls the image and restarts.
+
+To roll back, put the previous version back in `.env` and run `./install.sh`
+again.
+
+Remote console through the relay needs a relay image that supports **relay
+tunnels**, and a Home Node and app from the same release or newer.
+
+### Backups
+
+You need two things to restore: the database dump and `.env`. The dump is not
+encrypted, and `.env` holds the database password and the token signing
+secret, so store both somewhere private.
+
 ```bash
-docker compose pull
-docker compose up -d            # add --profile tls / --profile turn if you use them
+mkdir -p backups
+docker compose exec -T postgres pg_dump -U rivet rivet | gzip > "backups/rivet-$(date +%F).sql.gz"
 ```
-DB migrations are embedded in the relay binary and apply automatically on start.
 
-**Stop / start**
+Copy `backups/` and `.env` off the VPS, for example to your own machine:
+
 ```bash
-docker compose stop
-docker compose up -d
+scp 'user@relay.example.com:RivetLink-Docker/{.env,backups/*}' ./rivetlink-backup/
 ```
 
-**Back up the database**
+Keep `.env` private. Anyone who has it can sign tokens for your relay.
+
+To restore on a fresh VPS:
+
+1. Put back `.env`.
+2. Run `./install.sh`.
+3. Load the dump:
+
 ```bash
-docker compose exec postgres pg_dump -U rivet rivet > backup-$(date +%F).sql
+gunzip -c rivet-YYYY-MM-DD.sql.gz | docker compose exec -T postgres psql -U rivet rivet
 ```
 
-**Restore**
+### Signing everyone out
+
 ```bash
-cat backup-YYYY-MM-DD.sql | docker compose exec -T postgres psql -U rivet -d rivet
+./install.sh --rotate-jwt
 ```
 
-**Rotate secrets** — `./install.sh --force` regenerates `.env` with new secrets.
-Rotating `JWT_SECRET` invalidates every issued token (everyone re-logs in).
+This makes a new token secret. Every app has to sign in again; Home Nodes
+reconnect by themselves.
 
 ---
 
-## Configuration
+## Configuration (`.env`)
 
-All settings live in `.env` (generated from [`.env.example`](.env.example)).
-The important ones:
+| Key                  | Meaning                                                                    |
+|----------------------|----------------------------------------------------------------------------|
+| `DOMAIN`             | public name of the relay; Caddy gets its certificate                       |
+| `ACME_EMAIL`         | e-mail for Let's Encrypt                                                   |
+| `POSTGRES_PASSWORD`  | generated; **never change it after the first start** (the database keeps the old one) |
+| `JWT_SECRET`         | generated; rotate with `./install.sh --rotate-jwt`                         |
+| `RELAY_IMAGE`        | relay image and version; pin it                                            |
+| `RUST_LOG`           | relay log level (`info`, `debug`)                                          |
+| other `*_SECS` keys  | token lifetimes, login lockout, heartbeat; the defaults are fine           |
 
-| Variable            | Default                              | Meaning |
-| ------------------- | ------------------------------------ | ------- |
-| `POSTGRES_PASSWORD` | *(random)*                           | DB password; also woven into `DATABASE_URL`. |
-| `JWT_SECRET`        | *(random, ≥32 chars)*                | Signs access/refresh tokens. Keep secret. |
-| `RELAY_IMAGE`       | `gtheunissen/rivetlink-relay:latest` | Relay image to run. |
-| `RELAY_PORT`        | `8080`                               | Host port for plain HTTP. Use `127.0.0.1:8080` behind nginx. |
-| `DOMAIN`            | `relay.example.com`                  | Public hostname (tls profile only). |
-| `RUST_LOG`          | `info`                               | Log verbosity. |
-| token/security vars | see `.env.example`                   | Token lifetimes, login lockout, WS heartbeat/timeout. |
+After a change, run `./install.sh` again.
 
-### Profiles
-
-| Command                              | Brings up |
-| ------------------------------------ | --------- |
-| `docker compose up -d`               | postgres + redis + relay (plain HTTP) |
-| `docker compose --profile tls up -d` | + nginx HTTPS reverse proxy on 443 |
-| `docker compose --profile turn up -d`| + coturn TURN server (optional; for future WebRTC P2P) |
-
-`install.sh` wires these up for you via `--with-tls` / `--with-turn`.
-
----
-
-## Running a locally built image (no published image yet)
-
-Until the official image is published to GHCR, build it from the **main
-RivetLink repo** and point this stack at your local tag:
-
-```bash
-# in the RivetLink workspace repo:
-docker build -f docker/Dockerfile.relay -t rivetlink-relay:local .
-
-# here, in .env:
-RELAY_IMAGE=rivetlink-relay:local
-```
-Then `docker compose up -d`.
+You do **not** need TURN (`--with-turn`, coturn) for RivetLink today. The
+relay tunnel carries everything over HTTPS port 443.
 
 ---
 
 ## Security notes
 
-- `.env` is `chmod 600` and gitignored — it holds your JWT secret and DB password.
-- The relay sees only **ciphertext + metadata**. E2E keys never reach it.
-- The relay's auth endpoints are rate-limited per-IP; nginx forwards the real
-  client IP via `X-Forwarded-For` so limits work behind the proxy.
-- Use HTTPS for any non-LAN deployment. Keep ports 5432/6379 unpublished
-  (this compose keeps them on the internal network only).
-- Keep the host patched and the relay image up to date.
-
----
-
-## Layout
-
-```
-.
-├── install.sh                 # one-shot installer (secrets + up)
-├── docker-compose.yml         # postgres + redis + relay (+ tls/turn profiles)
-├── .env.example               # documented config template
-├── nginx/templates/           # HTTPS reverse-proxy config (envsubst ${DOMAIN})
-├── coturn/turnserver.conf     # optional TURN config template (install.sh renders turnserver.local.conf)
-├── certs/                     # TLS cert + key live here (gitignored)
-└── scripts/obtain-cert.sh     # Let's Encrypt helper
-```
+- Only Caddy is published. The relay and Postgres live on the private Docker
+  network.
+- Caddy passes the real client address to the relay and drops any
+  client-supplied `X-Forwarded-For`, so the login rate limit cannot be dodged.
+- Registration is closed to the internet. Accounts are created on the server
+  only.
+- The relay container drops all Linux capabilities and cannot gain new
+  privileges.
+- Keep the VPS patched: `sudo apt update && sudo apt upgrade`. Consider
+  `unattended-upgrades`.
 
 ---
 
 ## Troubleshooting
 
-| Symptom | Fix |
-| ------- | --- |
-| `relay` restarts / can't reach DB | `docker compose logs relay` — usually wrong/empty `JWT_SECRET` or `POSTGRES_PASSWORD`. Re-run `./install.sh`. |
-| nginx won't start | Missing `certs/fullchain.pem`/`privkey.pem`. Run `./scripts/obtain-cert.sh`. |
-| certbot fails | Port 80 must be free and DNS must already point at this host. |
-| `/health` works locally but not remotely | Firewall/security-group: open 8080 (LAN) or 80+443 (TLS). |
-| Tokens suddenly invalid after redeploy | `JWT_SECRET` changed. Don't `--force` unless you mean to rotate. |
+**`install.sh` waits for `/health` and gives up.**
+Run `docker compose logs caddy`. The usual causes are:
 
----
+- DNS does not point at this VPS yet;
+- port 80 or 443 is blocked by ufw or by the VPS provider's own firewall;
+- Let's Encrypt rate limits after many failed tries. Wait an hour.
 
-*Part of the RivetLink project. The relay is signaling-only and never a trusted
-authority — see the main project for the agent, client, and SDK.*
+**The app says "host identity changed; refusing the relay connection".**
+The relay reports a different key for the host than the one pinned before.
+This happens when the Home Node was reinstalled, and also when someone tampers
+with the relay. If you reinstalled it yourself, remove the host in the app and
+add it again.
+
+**The Home Node does not show up as online.**
+
+- On the Home Node, check **Settings → Ubuntu physical console**: is
+  **Via relay** on, and is the app signed in to the same account?
+- On the VPS, run `docker compose logs relay`. Look for the device's
+  authentication.
+
+**"relay tunnel did not open in time" from outside, while it works on the LAN.**
+The relay image or the Home Node is older than the release that added relay
+tunnels, or the Home Node is offline. Update both and check that the Home Node
+shows as online.
+
+**I lost `.env`.**
+You cannot recover the database password from the data. Restore `.env` from
+your backup. Without it, start over with a fresh volume:
+
+```bash
+docker compose down -v
+./install.sh --domain ... --email ...
+```
+
+`down -v` deletes all accounts and devices.
