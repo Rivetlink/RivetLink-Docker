@@ -30,7 +30,7 @@ if [[ ${#RL_PASSWORD} -lt 12 ]]; then
 fi
 export RL_EMAIL RL_NAME RL_ORG RL_PASSWORD
 
-python3 -c '
+if python3 -c '
 import json, os
 print(json.dumps({
     "email": os.environ["RL_EMAIL"],
@@ -39,6 +39,9 @@ print(json.dumps({
     "organization_name": os.environ["RL_ORG"],
 }))' | docker run --rm -i --network rivetlink-server_default curlimages/curl:8.23.0 \
   -fsS -o /dev/null -w '%{http_code}' -X POST http://relay:8080/auth/register \
-  -H 'content-type: application/json' --data-binary @- \
-  && echo " ✓ account created for ${RL_EMAIL}. Log in with it in the RivetLink app." \
-  || { echo " ERROR: the relay refused the account (e-mail already used?). See: docker compose logs relay" >&2; exit 1; }
+  -H 'content-type: application/json' --data-binary @-; then
+  echo " ✓ account created for ${RL_EMAIL}. Log in with it in the RivetLink app."
+else
+  echo " ERROR: the relay refused the account (e-mail already used?). See: docker compose logs relay" >&2
+  exit 1
+fi
