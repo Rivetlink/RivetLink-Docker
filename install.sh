@@ -10,7 +10,7 @@
 #   ./install.sh --domain relay.example.com --email you@example.com
 #   ./install.sh                     # re-run with the settings already in .env
 #   ./install.sh --rotate-jwt        # new JWT_SECRET (everyone logs in again)
-#   ./install.sh --with-turn         # also start coturn (not used by RivetLink yet)
+#   ./install.sh --with-turn         # also start coturn (STUN for direct connections)
 #
 set -euo pipefail
 
@@ -104,6 +104,10 @@ if [[ $WITH_TURN -eq 1 ]]; then
   # 644, not 600: the coturn image runs as `nobody` and must read the mount.
   chmod 644 coturn/turnserver.local.conf
   echo "✓ wrote coturn/turnserver.local.conf (realm=${DOMAIN})."
+  if ! grep -qE '^STUN_SERVER=.+' .env; then
+    set_var STUN_SERVER "${DOMAIN}:3478"
+    echo "✓ set STUN_SERVER=${DOMAIN}:3478 (open UDP 3478 in your firewall)."
+  fi
   PROFILES+=(--profile turn)
 fi
 

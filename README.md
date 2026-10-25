@@ -255,8 +255,30 @@ reconnect by themselves.
 
 After a change, run `./install.sh` again.
 
-You do **not** need TURN (`--with-turn`, coturn) for RivetLink today. The
-relay tunnel carries everything over HTTPS port 443.
+### Direct connections (optional)
+
+Without extra setup every session runs through the relay over HTTPS port 443.
+That always works. With a STUN server the apps first try to connect the two
+computers directly, so the picture does not pass through your VPS: lower
+latency and less VPS traffic. Sessions stay end-to-end encrypted either way.
+
+1. Start coturn as STUN server. This also sets `STUN_SERVER` in `.env`:
+
+   ```bash
+   ./install.sh --with-turn
+   ```
+
+2. Open UDP port 3478, in ufw and in your VPS provider's firewall:
+
+   ```bash
+   sudo ufw allow 3478/udp
+   ```
+
+3. Use relay image 0.1.108 or newer (`RELAY_IMAGE`).
+
+The apps pick the route by themselves. If a direct path cannot be made (for
+example behind a strict company firewall) they fall back to the relay. To turn
+it off again, empty `STUN_SERVER` in `.env` and run `./install.sh`.
 
 ---
 
