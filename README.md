@@ -182,8 +182,7 @@ docker compose logs -f caddy      # certificate problems show up here
 
 ### Updating
 
-Pin the relay image in `.env` instead of following `latest`, so an update is a
-choice you make:
+The relay image is pinned in `.env`, so an update is a choice you make:
 
 ```
 RELAY_IMAGE=gtheunissen/rivetlink-relay:<version>
@@ -198,8 +197,9 @@ To update:
 To roll back, put the previous version back in `.env` and run `./install.sh`
 again.
 
-Remote console through the relay needs a relay image that supports **relay
-tunnels**, and a Home Node and app from the same release or newer.
+Remote console through the relay needs relay image **0.1.105 or newer**, and
+RivetLink **v0.1.105 or newer** on both the Home Node and the controlling
+device.
 
 ### Backups
 
@@ -298,9 +298,9 @@ add it again.
   authentication.
 
 **"relay tunnel did not open in time" from outside, while it works on the LAN.**
-The relay image or the Home Node is older than the release that added relay
-tunnels, or the Home Node is offline. Update both and check that the Home Node
-shows as online.
+The relay image is older than 0.1.105 (check `RELAY_IMAGE` in `.env`), the
+Home Node or the app is older than v0.1.105, or the Home Node is offline.
+Update what is old and check that the Home Node shows as online.
 
 **I lost `.env`.**
 You cannot recover the database password from the data. Restore `.env` from
