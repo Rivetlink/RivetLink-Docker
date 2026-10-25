@@ -5,7 +5,7 @@ name: rivetlink-server
 #   caddy     public HTTPS/WSS on 80/443, automatic Let's Encrypt certificate
 #   relay     the RivetLink relay (not published; only Caddy reaches it)
 #   postgres  accounts, devices, audit log (not published)
-#   coturn    optional, --profile turn (not used by RivetLink yet)
+#   coturn    optional, --profile turn: STUN for direct peer-to-peer connections
 #
 # All secrets and tunables live in `.env` (generate it with ./install.sh).
 
@@ -53,6 +53,9 @@ services:
       HEARTBEAT_INTERVAL_SECS: ${HEARTBEAT_INTERVAL_SECS:-10}
       DISCONNECT_TIMEOUT_SECS: ${DISCONNECT_TIMEOUT_SECS:-30}
       RECONNECT_GRACE_SECS: ${RECONNECT_GRACE_SECS:-15}
+      # host:port of the STUN server (coturn). Set by ./install.sh --with-turn;
+      # empty means every session stays on the relay.
+      STUN_SERVER: ${STUN_SERVER:-}
     # Not published: Docker's published ports bypass ufw, so Caddy is the
     # only way in.
     expose:
