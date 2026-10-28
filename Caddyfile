@@ -16,5 +16,8 @@
 		# Send only the address Caddy saw. A client-supplied
 		# X-Forwarded-For would let it dodge the relay's login rate limit.
 		header_up X-Forwarded-For {remote_host}
+		# Caddy passes a client's own `Forwarded` header through untouched;
+		# older relays keyed the rate limit on it.
+		header_up -Forwarded
 	}
 }
