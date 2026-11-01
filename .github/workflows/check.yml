@@ -29,3 +29,38 @@ jobs:
           docker run --rm -v "$PWD/Caddyfile:/etc/caddy/Caddyfile:ro"
           -e DOMAIN=relay.example.com -e ACME_EMAIL=ci@example.com
           caddy:2.11.7-alpine caddy validate --config /etc/caddy/Caddyfile --adapter caddyfile
+
+  # Runs postgres + the pinned relay image on the throwaway runner: the relay
+  # healthcheck must pass, and a backup must restore what it saved.
+  stack:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: Start postgres and relay (waits for the healthchecks)
+        run: |
+          cp .env.example .env
+          sed -i -e 's|^POSTGRES_PASSWORD=.*|POSTGRES_PASSWORD=ci|' \
+                 -e 's|^JWT_SECRET=.*|JWT_SECRET=ci-secret-that-is-long-enough-1234|' \
+                 -e 's|^ACME_EMAIL=.*|ACME_EMAIL=ci@example.com|' .env
+          docker compose up -d --wait --wait-timeout 120 postgres relay
+      - name: Backup, change data, restore
+        run: |
+          sql() { docker compose exec -T postgres psql -U rivet -d rivet -v ON_ERROR_STOP=1 -tAc "$1"; }
+          sql "CREATE TABLE ci_marker (v text); INSERT INTO ci_marker VALUES ('before');"
+          mkdir -p backups && touch -d '20 days ago' backups/rivet-old.sql.gz
+          ./scripts/backup.sh
+          test ! -e backups/rivet-old.sql.gz
+          dump="$(ls backups/rivet-*.sql.gz)"
+          test "$(stat -c %a backups)" = 700
+          test "$(stat -c %a "$dump")" = 600
+          cmp .env "${dump%.sql.gz}.env"
+          sql "UPDATE ci_marker SET v = 'after';"
+          echo no | ./scripts/restore.sh "$dump" && exit 1
+          test "$(sql 'SELECT v FROM ci_marker')" = after
+          echo restore | ./scripts/restore.sh "$dump"
+          test "$(sql 'SELECT v FROM ci_marker')" = before
+          test "$(sql 'SELECT count(*) FROM _sqlx_migrations')" -gt 0
+          docker compose up -d --wait --wait-timeout 120 relay
+      - name: Logs on failure
+        if: failure()
+        run: docker compose logs --no-color
