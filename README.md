@@ -34,11 +34,25 @@ The stack:
 
 ## 1. Point your domain at the VPS
 
-At your DNS provider, add an **A** record. If your VPS also has IPv6, add an
-**AAAA** record too:
+At your DNS provider, add **only an A record** first:
 
 ```
 relay.example.com.   A      203.0.113.10
+```
+
+Add an **AAAA** record only after IPv6 works on the VPS. Run this on the VPS;
+it must print the VPS's IPv6 address:
+
+```bash
+curl -6 https://ifconfig.co
+```
+
+Let's Encrypt prefers IPv6 when an AAAA record exists. An AAAA record for a
+VPS whose IPv6 does not work makes the certificate request fail. Some hosts,
+for example Scaleway Dedibox, ship IPv6 switched off until you activate it in
+their console.
+
+```
 relay.example.com.   AAAA   2001:db8::10
 ```
 
@@ -69,6 +83,13 @@ Log out and back in so the group change applies. Then check:
 
 ```bash
 docker compose version
+```
+
+Optional check that the CPU has AES instructions (AES-NI). Any number above 0
+means TLS will not be the bottleneck:
+
+```bash
+grep -c aes /proc/cpuinfo
 ```
 
 ## 3. Firewall
@@ -203,32 +224,64 @@ device.
 
 ### Backups
 
-You need two things to restore: the database dump and `.env`. The dump is not
-encrypted, and `.env` holds the database password and the token signing
-secret, so store both somewhere private.
+A small VPS usually has a single disk without RAID. If that disk or the VPS
+is lost, everything on it is gone, backups in `backups/` included. Keep a copy
+**off the VPS**.
+
+Back up `.env` together with the database:
+
+- The database volume only opens with the `POSTGRES_PASSWORD` it was created
+  with. Without that `.env`, the database on the server cannot be used.
+- A new `JWT_SECRET` signs every app out.
+
+The dump is not encrypted, and `.env` holds both secrets. Anyone who has
+`.env` can sign tokens for your relay, so store both somewhere private.
+
+Make a backup:
 
 ```bash
-mkdir -p backups
-docker compose exec -T postgres pg_dump -U rivet rivet | gzip > "backups/rivet-$(date +%F).sql.gz"
+./scripts/backup.sh
 ```
 
-Copy `backups/` and `.env` off the VPS, for example to your own machine:
+This writes `backups/rivet-YYYY-MM-DD_HHMM.sql.gz` and a copy of `.env` next
+to it (only your user can read them). It deletes local backups older than
+`BACKUP_RETENTION_DAYS` (default 14 days).
+
+Run it every day with a systemd timer:
 
 ```bash
-scp 'user@relay.example.com:RivetLink-Docker/{.env,backups/*}' ./rivetlink-backup/
+sudo ./scripts/install-backup-timer.sh
+systemctl list-timers rivetlink-backup.timer
 ```
 
-Keep `.env` private. Anyone who has it can sign tokens for your relay.
+If the VPS was off at backup time, the backup runs after the next boot.
+Failures show up in `sudo journalctl -u rivetlink-backup.service`.
 
-To restore on a fresh VPS:
+**Offsite copy.** Set `BACKUP_REMOTE` in `.env` to an rsync/scp target, for
+example `user@backuphost:rivetlink-backups/`. Every backup is then also copied
+there. Your user on the VPS needs an ssh key that logs in to that host
+without a prompt. If rsync is installed on the VPS, the remote host needs
+rsync too; otherwise scp is used. Old copies on the remote are not deleted. Without
+`BACKUP_REMOTE`, copy the files off yourself:
 
-1. Put back `.env`.
+```bash
+scp 'user@relay.example.com:RivetLink-Docker/backups/*' ./rivetlink-backup/
+```
+
+**Restore** (this replaces the whole database):
+
+```bash
+./scripts/restore.sh backups/rivet-YYYY-MM-DD_HHMM.sql.gz
+```
+
+The dump is loaded into a separate database first. If it is broken, the
+current database stays as it is. The relay is only stopped for the switch.
+
+On a fresh VPS:
+
+1. Put back the `.env` from the backup, as `.env`.
 2. Run `./install.sh`.
-3. Load the dump:
-
-```bash
-gunzip -c rivet-YYYY-MM-DD.sql.gz | docker compose exec -T postgres psql -U rivet rivet
-```
+3. Run `./scripts/restore.sh` with the dump.
 
 ### Signing everyone out
 
@@ -251,6 +304,8 @@ reconnect by themselves.
 | `JWT_SECRET`         | generated; rotate with `./install.sh --rotate-jwt`                         |
 | `RELAY_IMAGE`        | relay image and version; pin it                                            |
 | `RUST_LOG`           | relay log level (`info`, `debug`)                                          |
+| `BACKUP_RETENTION_DAYS` | days `scripts/backup.sh` keeps local backups (default 14)               |
+| `BACKUP_REMOTE`      | optional rsync/scp target for an offsite copy of every backup              |
 | other `*_SECS` keys  | token lifetimes, login lockout, heartbeat; the defaults are fine           |
 
 After a change, run `./install.sh` again.
@@ -273,6 +328,9 @@ latency and less VPS traffic. Sessions stay end-to-end encrypted either way.
    ```bash
    sudo ufw allow 3478/udp
    ```
+
+   That is the only port coturn needs. It runs as STUN only (`stun-only`), so
+   it never relays traffic and needs no TURN port range.
 
 3. Use relay image 0.1.108 or newer (`RELAY_IMAGE`).
 
@@ -333,4 +391,6 @@ docker compose down -v
 ./install.sh --domain ... --email ...
 ```
 
-`down -v` deletes all accounts and devices.
+`down -v` deletes all accounts and devices. If you have a dump, load it
+afterwards with `./scripts/restore.sh`. Everyone has to sign in again, because
+the new `.env` has a new `JWT_SECRET`.
