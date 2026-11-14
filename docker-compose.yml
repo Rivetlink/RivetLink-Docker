@@ -37,7 +37,7 @@ services:
     # set RELAY_IMAGE in .env to your local tag, e.g.
     #   docker build -f docker/Dockerfile.relay -t rivetlink-relay:local .   (in the main RivetLink repo)
     #   RELAY_IMAGE=rivetlink-relay:local
-    image: ${RELAY_IMAGE:-gtheunissen/rivetlink-relay:0.1.110}
+    image: ${RELAY_IMAGE:-gtheunissen/rivetlink-relay:0.1.111}
     container_name: rivetlink-relay
     restart: unless-stopped
     depends_on:
